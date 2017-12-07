@@ -7,6 +7,11 @@ from numpy import fft as fft
 import threading
 from time import sleep
 from time import time
+from Queue import Queue
+import vlc
+import sys
+
+from VisualSimulation import VisualSimulation
 
 AudioSegment.converter = "C:/ffmpeg/bin/ffmpeg.exe"
 
@@ -58,20 +63,20 @@ class Song(object):
 		plt.plot(time[:self.sample_rate*seconds], self.left.get_array_of_samples()[:self.sample_rate*seconds] , linewidth=0.05)
 		plt.show()
 		
-	def start_fft_thread(self, millis):
+	def start_fft_thread(self, millis, message_Q):
 		
-		self.fft_thread = threading.Thread(target=self._fft_thread, args=(millis,))
+		self.fft_thread = threading.Thread(target=self._fft_thread, args=(millis, message_Q, ))
 		self.fft_thread.daemon = True
 		self.fft_thread.start()
 		
-	def _fft_thread(self, millis):
+	def _fft_thread(self, millis, message_Q):
 	
 		# Get the closest millisecond to millis that allows for power of two bin size
 		fft_samples = self.sample_rate*(millis/1000.0) # Number of bins
 		fft_samples = int( math.pow(2, math.ceil( math.log(fft_samples)/math.log(2) )) )# Power of two bins
 		
 		# Calculate the new milliseconds
-		millis = int((fft_samples)*(1.0/self.sample_rate)*1000)
+		millis = (fft_samples)*(1.0/self.sample_rate)*1000
 		
 		# Store all samples
 		samples = self.left.get_array_of_samples()
@@ -84,44 +89,76 @@ class Song(object):
 		
 		# Start time of thread
 		in_thread = time()
+		took_ms = 0
 		
-		# Sleep time in
-		in_sleep = 0
+		# Last sent
+		last_send_time  = time()*1000
 		
 		# Thread sleep delay in milliseconds
 		sleep_delay = 0
 		
+		# Start playing music
+		s = vlc.MediaPlayer(self.song_path)
+		
+		song_on = False
+		
 		while (start_sample + fft_samples) < max_samples:
 		
-			took_ms = self._fft_helper(fft_samples, samples, start_sample)
+		
+			took_ms = self._fft_helper(fft_samples, samples, start_sample, message_Q)
 			
+			if not song_on:
+				s.play()
+				song_on = True
+				
+			if s.get_time() - (start_sample*1.0/self.sample_rate)*1000 > 25:
+				print "Song Diff wrt Audio {}ms".format(s.get_time() - (start_sample*1.0/self.sample_rate)*1000)
+			else:
+				sleep((millis - took_ms - sleep_delay)/1000.0)
 			start_sample += fft_samples
+		
 			
-			sleep((millis - took_ms - sleep_delay)/1000.0)
 			
+		
+			#out_sleep = int(time()*1000)
+			
+			#if (out_sleep - in_sleep) - (millis - took_ms) >= 1:
+				##sleep_delay += 0.10
+				#print (out_sleep - in_sleep) - (millis - took_ms) 
+			
+		
+		# Send done message to visualization
+		message_Q.put("DONE")
+		s.stop()
+		
 		print "Took a total of {} seconds".format(int(time() - in_thread))
 			
 	
-	def _fft_helper(self, bin_size, samples, from_samp):
+	def _fft_helper(self, bin_size, samples, from_samp, message_Q):
 		
 		# Calculate the fft for a given size
-		t_in = time()
+		t_in = time()*1000
 		
-		F = np.fft.rfft(samples[from_samp:from_samp + bin_size + 1])/bin_size
+		message_Q.put(  20*np.log10( abs((np.fft.rfft(samples[from_samp:from_samp + bin_size + 1])/bin_size)[1:]) ) )
 		
-		return int( math.ceil((time() - t_in)*1000) )
+		return time()*1000 - t_in
 		
 	def fft(self):
 		
+		
 		size = self.sample_rate
 		
-		bins = np.arange(0, 256) # This should be the number of LEDs
+		bins = np.arange(0, 512) # This should be the number of LEDs*2
 		
-		F = np.fft.rfft(self.left.get_array_of_samples()[bins.shape[0]*5:bins.shape[0]*6])/bins.shape[0]
+		F = np.fft.rfft(self.left.get_array_of_samples()[bins.shape[0]*110:bins.shape[0]*111])/bins.shape[0]
+		#F = np.fft.rfft(self.left.get_array_of_samples()[bins.shape[0]*4:bins.shape[0]*5])
 		
+		print F.shape[0]
+		 
 		bin_multiplier = (size)/(bins.shape[0])
 		
-		plt.scatter(bins[0:bins.shape[0]/2 + 1]*bin_multiplier, 10*np.log(F))
+		plt.plot(bins[0:bins.shape[0]/2]*bin_multiplier, 20*np.log10(abs(F[1:])) )	
+		#plt.scatter(bins[0:bins.shape[0]/2 + 1]*bin_multiplier,  abs(F))
 	
 		plt.show()
 	
@@ -133,10 +170,17 @@ if __name__ == "__main__":
 	
 	song.set_properties()
 	
-	song.start_fft_thread(10)
+	q = Queue()
+	
+	viz = VisualSimulation(256, q)
+	
+	viz.start()
+	
+	song.start_fft_thread(10, q)
 	
 	while song.fft_thread.is_alive():
-		print "Alive"
+		#print "Alive"
+		
 		sleep(5)
 	
 	#song.display()

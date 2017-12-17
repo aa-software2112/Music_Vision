@@ -5,13 +5,15 @@ import math
 import threading
 from Queue import Queue
 from time import time
+from peakutils.peak import indexes
+import peaks
 
 class VisualSimulation(object):
 	
 	""" Bin pixel dimensions"""
-	BIN_WIDTH = 3
-	BIN_HEIGHT = 20 
-	BIN_SPACING = 3
+	BIN_WIDTH = 7
+	BIN_HEIGHT = 50 
+	BIN_SPACING = 5
 	
 	""" Image Thresholds """
 	MAX_FRAME_WIDTH = 1700
@@ -20,8 +22,6 @@ class VisualSimulation(object):
 	""" Frame thickness """
 	FRAME_BAR_THICKNESS = 15
 	
-	
-
 	def __init__(self, bins, message_Q=None):
 	
 		self.bins = bins
@@ -32,55 +32,104 @@ class VisualSimulation(object):
 		
 		self.rows_of_bins = 0
 		
+		self.prev_display = [110 for x in range(bins)]
+		
+		self.curr_display = [0 for x in range(bins)]
+		
+		self.largest_value = 0
+		
 	def _set_window(self):
 		
 		
 		total_bin_width = (self.bins*VisualSimulation.BIN_WIDTH + (self.bins - 1)*(VisualSimulation.BIN_SPACING))
-		rows_of_bins = int(math.ceil(float(total_bin_width)/(VisualSimulation.MAX_FRAME_WIDTH - 2*VisualSimulation.FRAME_BAR_THICKNESS)))
 		
-		#height = rows_of_bins*VisualSimulation.BIN_HEIGHT + (rows_of_bins - 1)*VisualSimulation.FRAME_BAR_THICKNESS/2 + 2*VisualSimulation.FRAME_BAR_THICKNESS
+		rows_of_bins = int(math.ceil(float(total_bin_width)/(VisualSimulation.MAX_FRAME_WIDTH - 2*VisualSimulation.FRAME_BAR_THICKNESS)))
 		
 		self.rows_of_bins = rows_of_bins # Store for use later
 		
 		# Create a blank window
-		self.frame = np.zeros((VisualSimulation.MAX_FRAME_HEIGHT,VisualSimulation.MAX_FRAME_WIDTH), np.uint8)
+		self.frame = np.zeros((VisualSimulation.MAX_FRAME_HEIGHT,VisualSimulation.MAX_FRAME_WIDTH, 3), np.uint8)
 		
 	def _clear_window(self):
 		
 		self.frame[:] = 0
+	
+	def _db_to_color(self, db):
+		
+		# color format is BGR
+		return (0, 255, 0)
+		
+		if db <= 15:
+			return (0, 0, 255)
+			
+		if db <= 50:
+			return (0, 255, 255)
+		
+		return (0, 255, 0)
 		
 	def _draw_bins(self, data):	
-	
+		
+		data = abs(data)
+		data[ data > 100] = 100
+		data = data[:self.bins]
+		
+		self.largest_value = max( max(data), self.largest_value)
+		
+		# Get the number of bins per row
 		bins_per_row = int(math.ceil((VisualSimulation.MAX_FRAME_WIDTH - 2*VisualSimulation.FRAME_BAR_THICKNESS + VisualSimulation.BIN_SPACING)/(VisualSimulation.BIN_WIDTH + VisualSimulation.BIN_SPACING)))
 	
-		if bins_per_row > 256:
-			bins_per_row = 256
+		if bins_per_row > self.bins:
+			bins_per_row = self.bins
 	
 		# Clear the previous plot
 		self._clear_window()
-	
+		#self._display_window()
+		
 		px = py = 0 # Pixel pointers for x and y
 		
 		# Start at bottom
 		py = VisualSimulation.MAX_FRAME_HEIGHT - VisualSimulation.FRAME_BAR_THICKNESS
 		
-		# intensity = []
-		heights = []
+		# Get peaks
+		energy = peaks.peak_energy(data, len(data), self.largest_value)
+		print energy
+		# TODO check distribution, and when it is well distributed, go with lower thres, and when it is not well distributed, go with higher thres
+		pks = indexes(np.array(data), thres= energy, min_dist=energy*50) # Thresh is db and min_dist is index distance/samples apart
 		
-		# Ceiling data to 100
-		if not type(data) == type(None):
-			data[data > 100] = 100 
-		
-			#intensity = list(map(lambda db: int( (db/100.0)*255), data))
-			heights = list(map(lambda db: int( (db/100.0)*(VisualSimulation.MAX_FRAME_HEIGHT - 20)), data))
-		else:
+		# Map decibels to height
+		# No peaks found
+		if len(pks) > 0:
+			self.curr_display = peaks.expand_peaks(pks, len(data), data, log_factor=1.05)
+				
+			self.curr_display = map(lambda db: ( int((float(db)/float(self.largest_value))*(VisualSimulation.MAX_FRAME_HEIGHT - 25))), self.curr_display)
 			
-			#intensity = [255 for x in range(256)]
-			heights = [VisualSimulation.MAX_FRAME_HEIGHT - 20 for x in range(256)]
+			self.curr_display = peaks.OR_peaks(self.prev_display, self.curr_display, len(self.curr_display), decrement_by=int((1-energy)*10))
+			
+		else:
+			self.curr_display = peaks.OR_peaks(self.curr_display, self.curr_display, len(self.curr_display), decrement_by=int((1-energy)*10))
+			
+		#color_percent = map(lambda c: float(c)/min(100, maxi), data) 
 		
-		#print heights[:10]
-		#print "Rows {}".format(self.rows_of_bins)
-		#print "Bins Per Row {}".format(bins_per_row)
+		# Uncomment sorting to have regular ascending frequency display
+		#temp = sorted(self.curr_display)
+		
+		#right_idx = len(temp)/2
+		#left_idx =  right_idx - 1
+		#temp_idx = len(temp) - 1
+		
+		#while left_idx > -1:
+			
+			#self.curr_display[right_idx] = temp[temp_idx]
+			#right_idx += 1
+			#temp_idx -= 1
+			
+			#if temp_idx == -1:
+				#break
+			
+			#self.curr_display[left_idx] = temp[temp_idx]
+			#left_idx -= 1
+			#temp_idx -= 1
+		
 		
 		intensity_idx = 0
 		
@@ -93,24 +142,32 @@ class VisualSimulation(object):
 			# Each bin per row
 			for bn in range(bins_per_row):
 					
+				#cv2.rectangle(self.frame, (px, py), (px + VisualSimulation.BIN_WIDTH, py + VisualSimulation.BIN_HEIGHT),  (0, 255*(color_percent[idx]), 255*(1-color_percent[idx])),  thickness=-1)
+				
 				#cv2.rectangle(self.frame, (px, py), (px + VisualSimulation.BIN_WIDTH, py + VisualSimulation.BIN_HEIGHT),  intensity[intensity_idx],  thickness=-1)
-				cv2.rectangle(self.frame, (px, py-heights[intensity_idx]), (px + VisualSimulation.BIN_WIDTH, py),  255,  thickness=1)
+				
+				# vertical movement
+				#if intensity_idx in peaks:
+				cv2.rectangle(self.frame, (px, py-self.curr_display[intensity_idx]), (px + VisualSimulation.BIN_WIDTH, py),  (44,245,131),  thickness=1)
 				
 				intensity_idx += 1
 				
-				if intensity_idx >= len(heights):
+				if intensity_idx >= len(self.curr_display):
 					break
 				
 				px += VisualSimulation.BIN_WIDTH + VisualSimulation.BIN_SPACING
 						
 			# Move down one row
 			py -= (VisualSimulation.BIN_HEIGHT + VisualSimulation.FRAME_BAR_THICKNESS/2)
+			
+		# Store the current frame as previous
+		self.prev_display = self.curr_display[:]
 
 	def _display_thread(self):
 		
 		msg = None
 		
-		last_display_time = int(time()*1000)
+		last_display_time = time()*1000
 		
 		# Display Interval (only update every few milliseconds)
 		display_interval = -1
@@ -118,9 +175,13 @@ class VisualSimulation(object):
 		while True:
 			
 				if not self.Q.empty():
-					
-					if self.Q.qsize() > 1:
+
+					# Clear all due to delay
+					while self.Q.qsize() > 1:
 						print self.Q.qsize()
+						self.Q.get()
+						
+					#print self.Q.qsize()
 					
 					msg = self.Q.get()
 					
@@ -128,12 +189,18 @@ class VisualSimulation(object):
 						
 						if msg == "DONE": # Song is done, terminate thread
 							break
+							
 					else: # Is a row of bin data
 						
-						if int(time()*1000) - last_display_time >= display_interval:
-							self._draw_bins(msg) # Draw the data
-							self._display_window()
-							last_display_time = int(time()*1000)
+						# Update every interval time
+						#if time()*1000 - last_display_time >= display_interval:
+						self._draw_bins(msg) # Draw the data
+						self._display_window()
+							#last_display_time = time()*1000
+						## Lower the waves
+						#else:
+							#self._draw_bins(None) # Draw the data
+							#self._display_window()
 						
 				if cv2.waitKey(1) == ord('q'):
 					break

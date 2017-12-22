@@ -120,8 +120,9 @@ class Song(object):
 				s.play()
 				song_on = True
 				
-			if s.get_time() - (start_sample*1.0/self.sample_rate)*1000 > 5:
-				print "Song Diff wrt Audio {}ms".format(s.get_time() - (start_sample*1.0/self.sample_rate)*1000)
+			if s.get_time() - (start_sample*1.0/self.sample_rate)*1000 > 2:
+				pass
+				#print "Song Diff wrt Audio {}ms".format(s.get_time() - (start_sample*1.0/self.sample_rate)*1000)
 			else:
 				sleep((millis - took_ms - sleep_delay)/1000.0)
 			
@@ -165,7 +166,7 @@ class Song(object):
 	
 if __name__ == "__main__":
 	
-	song = Song(glob.glob("2 - Primus - The Seven.mp3")[0])
+	song = Song(glob.glob("01 - Prison Song.mp3")[0])
 	
 	
 	song.load()

@@ -7,6 +7,7 @@ from Queue import Queue
 from time import time
 from peakutils.peak import indexes
 import peaks
+import variance
 
 class VisualSimulation(object):
 	
@@ -67,10 +68,61 @@ class VisualSimulation(object):
 		
 		return (0, 255, 0)
 		
+	def _convert_db_to(self, data, mode=1):
+		""" This function takes an array of decibel data and returns the output visualization based on the requested mode"""
+		
+		# Peak mode
+		if mode == 1:
+			# Get peaks
+			#energy = peaks.peak_energy(data, len(data), self.largest_value)
+			
+			# TODO check distribution, and when it is well distributed, go with lower thres, and when it is not well distributed, go with higher thres
+			pks = indexes(np.array(data), thres=0.75, min_dist=1) # Thresh is db and min_dist is index distance/samples apart
+			
+			# Map decibels to height
+			# No peaks found
+			if len(pks) > 0:
+				self.curr_display = peaks.expand_peaks(pks, len(data), data, log_factor=1.05)
+					
+				self.curr_display = map(lambda db: ( int((float(db)/float(self.largest_value))*(VisualSimulation.MAX_FRAME_HEIGHT - 25))), self.curr_display)
+				
+				self.curr_display = peaks.OR_peaks(self.prev_display, self.curr_display, len(self.curr_display), decrement_by=20)
+				
+			else:
+				self.curr_display = peaks.OR_peaks(self.curr_display, self.curr_display, len(self.curr_display), decrement_by=20)
+		
+		# Regular db display mode
+		elif mode == 2:	
+		
+			mini = min(data)
+			
+			self.curr_display = map(lambda db: ( int((float(db)/float(self.largest_value))*(VisualSimulation.MAX_FRAME_HEIGHT - 10)) - int(mini)), data)
+			
+			self.curr_display = peaks.OR_peaks(self.prev_display, self.curr_display, len(self.curr_display), decrement_by=10)
+			
+		# Variance display mode, very fragile
+		elif mode == 3:
+			
+			self.curr_display = variance.filter_by_variance(data, var_thresh=5)
+			
+			mini = min(data)
+			
+			self.curr_display = map(lambda db: ( int((float(db)/float(self.largest_value))*(VisualSimulation.MAX_FRAME_HEIGHT - 10)) - int(mini)), data)
+			
+			self.curr_display = peaks.OR_peaks(self.prev_display, self.curr_display, len(self.curr_display), decrement_by=10)
+			
+		
 	def _draw_bins(self, data):	
+		
+		if data[0] < -254:
+			self._clear_window()
+			self._display_window()
+			return
 		
 		data = abs(data)
 		data[ data > 100] = 100
+		
+		
 		data = data[:self.bins]
 		
 		self.largest_value = max( max(data), self.largest_value)
@@ -90,23 +142,7 @@ class VisualSimulation(object):
 		# Start at bottom
 		py = VisualSimulation.MAX_FRAME_HEIGHT - VisualSimulation.FRAME_BAR_THICKNESS
 		
-		# Get peaks
-		energy = peaks.peak_energy(data, len(data), self.largest_value)
-		print energy
-		# TODO check distribution, and when it is well distributed, go with lower thres, and when it is not well distributed, go with higher thres
-		pks = indexes(np.array(data), thres= energy, min_dist=energy*50) # Thresh is db and min_dist is index distance/samples apart
-		
-		# Map decibels to height
-		# No peaks found
-		if len(pks) > 0:
-			self.curr_display = peaks.expand_peaks(pks, len(data), data, log_factor=1.05)
-				
-			self.curr_display = map(lambda db: ( int((float(db)/float(self.largest_value))*(VisualSimulation.MAX_FRAME_HEIGHT - 25))), self.curr_display)
-			
-			self.curr_display = peaks.OR_peaks(self.prev_display, self.curr_display, len(self.curr_display), decrement_by=int((1-energy)*10))
-			
-		else:
-			self.curr_display = peaks.OR_peaks(self.curr_display, self.curr_display, len(self.curr_display), decrement_by=int((1-energy)*10))
+		self._convert_db_to(data, mode=1)
 			
 		#color_percent = map(lambda c: float(c)/min(100, maxi), data) 
 		
@@ -162,6 +198,7 @@ class VisualSimulation(object):
 			
 		# Store the current frame as previous
 		self.prev_display = self.curr_display[:]
+		
 
 	def _display_thread(self):
 		
@@ -178,12 +215,13 @@ class VisualSimulation(object):
 
 					# Clear all due to delay
 					while self.Q.qsize() > 1:
-						print self.Q.qsize()
+						#print self.Q.qsize()
 						self.Q.get()
 						
 					#print self.Q.qsize()
 					
 					msg = self.Q.get()
+					
 					
 					if type(msg) == type(""): # Is a string
 						

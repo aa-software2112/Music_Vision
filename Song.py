@@ -166,7 +166,7 @@ class Song(object):
 	
 if __name__ == "__main__":
 	
-	song = Song(glob.glob("01 - Prison Song.mp3")[0])
+	song = Song(glob.glob("Exclusion-Unity.mp3")[0])
 	
 	
 	song.load()

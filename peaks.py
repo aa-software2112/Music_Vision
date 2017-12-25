@@ -1,6 +1,12 @@
 import math
 import matplotlib.pyplot as plt
 
+def filter_by_bool(old_value, new_value, include):
+	
+	if include:
+		return new_value
+	return old_value - 1
+
 def expand_peaks(p_ind, arr_size, data, log_factor=1.25):
 	"""Expands peaks by decreasing around them logarithmically in the array"""
 	
@@ -79,7 +85,16 @@ def peak_energy(peaks, size, largest_value):
 	
 	return float(actual_energy)/total_energy
 	
+def peak_diff(old, new):
+	""" This returns the difference new db - old db to get the decibel attack"""
+	out = map(lambda o, n: n - o, old, new)
 	
+	#print "old {} \n new {}".format(old, new)
+	
+	out = [max(diff, 0) for diff in out]
+	
+	return out
+		
 if __name__ == "__main__":
 	#d = [5,25,50,70]
 	#arr_size = 144

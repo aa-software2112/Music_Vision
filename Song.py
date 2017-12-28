@@ -151,7 +151,7 @@ class Song(object):
 		size = self.sample_rate
 		
 		bins = np.arange(0, 512) # This should be the number of LEDs*2
-		
+			
 		F = np.fft.rfft(self.left.get_array_of_samples()[bins.shape[0]*110:bins.shape[0]*111])/bins.shape[0]
 		#F = np.fft.rfft(self.left.get_array_of_samples()[bins.shape[0]*4:bins.shape[0]*5])
 		
@@ -166,7 +166,7 @@ class Song(object):
 	
 if __name__ == "__main__":
 	
-	song = Song(glob.glob("Exclusion-Unity.mp3")[0])
+	song = Song(glob.glob("RyanWhit-SuperKick.mp3")[0])
 	
 	
 	song.load()

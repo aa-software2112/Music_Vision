@@ -1,5 +1,6 @@
 import math
 import matplotlib.pyplot as plt
+import numpy as np
 
 def filter_by_bool(old_value, new_value, include):
 	
@@ -73,7 +74,12 @@ def OR_peaks(old, new, size, decrement_by=1):
 	given that if an old peak is > a new peak, the output is old peak - decrement_by,
 	otherwise it is the new peak"""
 	
-	return map(lambda o, n: max((o - decrement_by), n), old, new)
+	#print type(old)
+	#print type(list(new))
+	
+	#print len(old)
+	#print len(new)
+	return np.array(map(lambda o, n: int(max((o - decrement_by), n)), old, list(new)))
 	
 def peak_energy(peaks, size, largest_value):
 	""" Returns a peak energy from 0 ->1.0, inclusive """
@@ -87,13 +93,19 @@ def peak_energy(peaks, size, largest_value):
 	
 def peak_diff(old, new):
 	""" This returns the difference new db - old db to get the decibel attack"""
-	out = map(lambda o, n: n - o, old, new)
+	return  map(lambda o, n: max(n - o, 0), old, new)
 	
-	#print "old {} \n new {}".format(old, new)
+		
+def peak_moving_average(data, weights):
 	
-	out = [max(diff, 0) for diff in out]
+	# Preserve the data lost in the convolution
+	lost = data[ len(data) - len(weights) + 1: len(data)]
 	
-	return out
+	weights = np.flip(np.array(weights), 0)
+
+	conv = np.convolve(data, weights, mode='valid')
+	
+	return np.append(np.divide(conv, np.sum(weights)), lost).astype(dtype=np.int32)
 		
 if __name__ == "__main__":
 	#d = [5,25,50,70]

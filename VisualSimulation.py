@@ -4,6 +4,7 @@ from time import sleep
 import math
 import threading
 from Queue import Queue
+from time import sleep
 from time import time
 from peakutils.peak import indexes
 import peaks
@@ -18,7 +19,7 @@ class VisualSimulation(object):
 	
 	""" Image Thresholds """
 	MAX_FRAME_WIDTH = 1700
-	MAX_FRAME_HEIGHT = 400
+	MAX_FRAME_HEIGHT = 200
 	
 	""" Frame thickness """
 	FRAME_BAR_THICKNESS = 15
@@ -40,6 +41,9 @@ class VisualSimulation(object):
 		self.largest_value = 0
 		
 		self.prev_data = [0 for x in range(bins)]
+		
+		self.history = np.zeros([3, self.bins], dtype=np.int32)
+		self.history_ptr = 0
 		
 	def _set_window(self):
 		
@@ -70,7 +74,7 @@ class VisualSimulation(object):
 		
 		return (0, 255, 0)
 		
-	def _convert_db_to(self, data, mode=1):
+	def _convert_db_to(self, data, mode=1, decrement_by=2):
 		""" This function takes an array of decibel data and returns the output visualization based on the requested mode"""
 		
 		# Peak mode
@@ -96,10 +100,42 @@ class VisualSimulation(object):
 		# Regular db display mode
 		elif mode == 2:	
 		
-			self.curr_display = map(lambda db: ( int((float(db)/float(100))*(VisualSimulation.MAX_FRAME_HEIGHT - 10))), data)
+			# Add data to the history, fill it first
+			if self.history_ptr < self.history.shape[0]:
+				
+				self.history[self.history_ptr] = data
+				self.history_ptr += 1
 			
-			self.curr_display = peaks.OR_peaks(self.prev_display, self.curr_display, len(self.curr_display), decrement_by=1)
-			
+			# History is full, get average, roll, and add new data to it
+			else:
+				
+				self.history = np.roll(self.history, self.history.shape[0]-1, axis=0) # Shift all data 
+				
+				# Insert new data 
+				self.history[self.history_ptr - 1] = data
+				
+				avg = np.sum(self.history, axis=0)/self.history.shape[0] # Average array of size bins
+				
+				data = avg
+				
+				self.curr_display = map(lambda db: ( int((float(db)/float(100))*(VisualSimulation.MAX_FRAME_HEIGHT - 10))), data)
+				self.curr_display = np.array(self.curr_display)
+				
+				# Get average
+				self.curr_display = peaks.peak_moving_average(self.curr_display, [1, 1, 1])
+				
+				centile = np.percentile(self.curr_display, 50)
+				# Damp and peak
+				if centile > 0:
+					# Damp
+					self.curr_display[self.curr_display < centile] = self.curr_display[self.curr_display < centile] - decrement_by
+					self.curr_display[self.curr_display < 0] = 0
+					
+					## Peak
+					#self.curr_display[self.curr_display >= centile] = self.curr_display[self.curr_display >= centile] + 10
+				
+				#self.curr_display = peaks.OR_peaks(self.prev_display, self.curr_display, len(self.curr_display), decrement_by=decrement_by)
+				
 		# Variance display mode, very fragile
 		elif mode == 3:
 			
@@ -116,26 +152,39 @@ class VisualSimulation(object):
 			
 			diff = peaks.peak_diff(self.prev_data, data)
 			
+									
+			#print "Diff {}".format(diff[0:3])
+			#print "Prev {}".format(self.prev_data[0:3])
+			#print "This {}".format(data[0:3])
+			
 			if reduce(lambda accum, d: accum + d, diff) > 0:
 			
-				# Remove all differences less than 10
-				diff = [ val1 if val1 > 15 else 0 for val1 in diff ]
+				# Remove all differences less than X
+				diff = [ val1 if val1 > 30 else 0 for val1 in diff ]
 				
 				# Display new data that is above the attack threshold (25), else slowly decrease the data				
 				data = map(lambda db_diff, old, new: peaks.filter_by_bool(old, new, db_diff > 0), diff, self.prev_data, data)
+				#print "To display {}".format(data[0:3])
+				
+				#print "\n"
 				
 				self.curr_display = map(lambda db: ( int((float(db)/float(100))*(VisualSimulation.MAX_FRAME_HEIGHT - 10)) ), data)
+
+				return data
 
 			else:
 				
 				self._convert_db_to(data, mode=2)
+				
+				print "Recurse mode 2"
 		
 		
 	def _draw_bins(self, data):	
 		
-		decrement = type(data) == type(None)
+		decrement = (type(data) == type(None))
 		
 		if type(data) == type(None):
+			#print "Data is None {}".format(data)
 			data = self.prev_data[:]
 		
 		elif data[0] < -254:
@@ -167,10 +216,16 @@ class VisualSimulation(object):
 		# Start at bottom
 		py = VisualSimulation.MAX_FRAME_HEIGHT - VisualSimulation.FRAME_BAR_THICKNESS
 		
-		if not decrement:
-			self._convert_db_to(data, mode=4)
+			#temp = self._convert_db_to(data, mode=4)
+			
+			#if not type(temp) == type(None):
+				#data = temp
+		#else:
+		if decrement:
+			self._convert_db_to(data, mode=2, decrement_by=5)
 		else:
-			self._convert_db_to(data, mode=2)
+			self._convert_db_to(data, mode=2, decrement_by=3)
+			
 			
 		#color_percent = map(lambda c: float(c)/min(100, maxi), data) 
 		
@@ -211,8 +266,7 @@ class VisualSimulation(object):
 				#cv2.rectangle(self.frame, (px, py), (px + VisualSimulation.BIN_WIDTH, py + VisualSimulation.BIN_HEIGHT),  intensity[intensity_idx],  thickness=-1)
 				
 				# vertical movement
-				#if intensity_idx in peaks:
-				cv2.rectangle(self.frame, (px, py-self.curr_display[intensity_idx]), (px + VisualSimulation.BIN_WIDTH, py),  (44,245,131),  thickness=1)
+				cv2.rectangle(self.frame, (px, py-self.curr_display[intensity_idx]), (px + VisualSimulation.BIN_WIDTH, py),  (44,255,131),  thickness=1)
 				
 				intensity_idx += 1
 				
@@ -236,7 +290,7 @@ class VisualSimulation(object):
 		last_display_time = time()*1000
 		
 		# Display Interval (only update every few milliseconds)
-		display_interval = 25
+		display_interval = -1
 		
 		while True:
 			
@@ -265,10 +319,14 @@ class VisualSimulation(object):
 							self._display_window()
 							last_display_time = time()*1000
 						## Lower the waves
-						else:
-							self._draw_bins(None) # Draw the data
-							self._display_window()
-						
+						#else:
+							#self._draw_bins(None) # Draw the data
+							#self._display_window()
+				# Is empty
+				else:
+					self._draw_bins(None) # Draw the data
+					self._display_window()
+				
 				if cv2.waitKey(1) == ord('q'):
 					break
 				

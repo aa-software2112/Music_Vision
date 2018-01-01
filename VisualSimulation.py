@@ -9,13 +9,14 @@ from time import time
 from peakutils.peak import indexes
 import peaks
 import variance
+import random
 
 class VisualSimulation(object):
 	
 	""" Bin pixel dimensions"""
-	BIN_WIDTH = 7
-	BIN_HEIGHT = 50 
-	BIN_SPACING = 5
+	BIN_WIDTH = 5
+	BIN_HEIGHT = 60
+	BIN_SPACING = 0
 	
 	""" Image Thresholds """
 	MAX_FRAME_WIDTH = 1700
@@ -34,15 +35,19 @@ class VisualSimulation(object):
 		
 		self.rows_of_bins = 0
 		
-		self.prev_display = [110 for x in range(bins)]
+		self.prev_display = np.array([110 for x in range(bins)])
 		
-		self.curr_display = [0 for x in range(bins)]
+		self.curr_display = np.array([0 for x in range(bins)])
 		
 		self.largest_value = 0
 		
-		self.prev_data = [0 for x in range(bins)]
+		self.prev_data = np.array([0 for x in range(bins)])
+		
+		self.normalize = VisualSimulation.MAX_FRAME_HEIGHT - 10
 		
 		self.history = np.zeros([3, self.bins], dtype=np.int32)
+		self.history_weights = [ 0.1, 0.2, 0.7]
+		
 		self.history_ptr = 0
 		
 	def _set_window(self):
@@ -74,28 +79,19 @@ class VisualSimulation(object):
 		
 		return (0, 255, 0)
 		
-	def _convert_db_to(self, data, mode=1, decrement_by=2):
+	def _convert_db_to(self, data, mode=1, decrement_by=2,):
 		""" This function takes an array of decibel data and returns the output visualization based on the requested mode"""
 		
-		# Peak mode
+		
+		# Follow the average noise
 		if mode == 1:
-			# Get peaks
-			#energy = peaks.peak_energy(data, len(data), self.largest_value)
 			
-			# TODO check distribution, and when it is well distributed, go with lower thres, and when it is not well distributed, go with higher thres
-			pks = indexes(np.array(data), thres=0.50, min_dist=1) # Thresh is db and min_dist is index distance/samples apart
+			data = np.array(data)
 			
-			# Map decibels to height
-			# No peaks found
-			if len(pks) > 0:
-				self.curr_display = peaks.expand_peaks(pks, len(data), data, log_factor=1.20)
-					
-				self.curr_display = map(lambda db: ( int((float(db)/float(self.largest_value))*(VisualSimulation.MAX_FRAME_HEIGHT - 25))), self.curr_display)
-				
-				self.curr_display = peaks.OR_peaks(self.prev_display, self.curr_display, len(self.curr_display), decrement_by=20)
-				
-			else:
-				self.curr_display = peaks.OR_peaks(self.curr_display, self.curr_display, len(self.curr_display), decrement_by=20)
+			avg_db = np.sum(data)/data.shape[0]
+			
+			self.curr_display[:] = avg_db
+			
 		
 		# Regular db display mode
 		elif mode == 2:	
@@ -109,22 +105,42 @@ class VisualSimulation(object):
 			# History is full, get average, roll, and add new data to it
 			else:
 				
+				data = np.array(data)
+				
+				# Get average of the last N samples (before the current data)
+				#avg_old = np.sum(self.history, axis=0)/self.history.shape[0] # Average array of size bins
+				avg_old = np.zeros([self.history.shape[1], ])
+				
+				# Old Weighted Average
+				for idx, row in enumerate(self.history):
+					avg_old += row*self.history_weights[idx]
+				
+				# Get the boolean index of difference between the current data and the old average that meets threshold requirements
+				difference = np.abs(np.subtract(data, avg_old)) > 30
+				
 				self.history = np.roll(self.history, self.history.shape[0]-1, axis=0) # Shift all data 
 				
 				# Insert new data 
 				self.history[self.history_ptr - 1] = data
 				
-				avg = np.sum(self.history, axis=0)/self.history.shape[0] # Average array of size bins
+				#avg_new = np.sum(self.history, axis=0)/self.history.shape[0] # Average array of size bins
+				avg_new = np.zeros([self.history.shape[1], ])
 				
-				data = avg
+				# New Weighted Average
+				for idx, row in enumerate(self.history):
+					avg_new += row*self.history_weights[idx]
+					
+				data = avg_new
+				self.curr_display[ difference ] = ( ((avg_new[difference])/float(100))*self.normalize ).astype(np.int32)
+				self.curr_display[ ~difference ] = ( (avg_new[~difference]/float(100))*self.normalize).astype(np.int32)
 				
-				self.curr_display = map(lambda db: ( int((float(db)/float(100))*(VisualSimulation.MAX_FRAME_HEIGHT - 10))), data)
+				#self.curr_display = map(lambda db: ( int((float(db)/float(100))*(VisualSimulation.MAX_FRAME_HEIGHT - 10))), data)
 				self.curr_display = np.array(self.curr_display)
 				
 				# Get average
-				self.curr_display = peaks.peak_moving_average(self.curr_display, [1, 1, 1])
+				self.curr_display = peaks.peak_moving_average(self.curr_display, [1, 1, 1, 1])
 				
-				centile = np.percentile(self.curr_display, 50)
+				centile = np.percentile(self.curr_display, 65)
 				# Damp and peak
 				if centile > 0:
 					# Damp
@@ -136,48 +152,6 @@ class VisualSimulation(object):
 				
 				#self.curr_display = peaks.OR_peaks(self.prev_display, self.curr_display, len(self.curr_display), decrement_by=decrement_by)
 				
-		# Variance display mode, very fragile
-		elif mode == 3:
-			
-			self.curr_display = variance.filter_by_variance(data, var_thresh=5)
-			
-			mini = min(data)
-			
-			self.curr_display = map(lambda db: ( int((float(db)/float(self.largest_value))*(VisualSimulation.MAX_FRAME_HEIGHT - 10))), data)
-			
-			self.curr_display = peaks.OR_peaks(self.prev_display, self.curr_display, len(self.curr_display), decrement_by=10)
-			
-		# Attack mode
-		elif mode == 4:
-			
-			diff = peaks.peak_diff(self.prev_data, data)
-			
-									
-			#print "Diff {}".format(diff[0:3])
-			#print "Prev {}".format(self.prev_data[0:3])
-			#print "This {}".format(data[0:3])
-			
-			if reduce(lambda accum, d: accum + d, diff) > 0:
-			
-				# Remove all differences less than X
-				diff = [ val1 if val1 > 30 else 0 for val1 in diff ]
-				
-				# Display new data that is above the attack threshold (25), else slowly decrease the data				
-				data = map(lambda db_diff, old, new: peaks.filter_by_bool(old, new, db_diff > 0), diff, self.prev_data, data)
-				#print "To display {}".format(data[0:3])
-				
-				#print "\n"
-				
-				self.curr_display = map(lambda db: ( int((float(db)/float(100))*(VisualSimulation.MAX_FRAME_HEIGHT - 10)) ), data)
-
-				return data
-
-			else:
-				
-				self._convert_db_to(data, mode=2)
-				
-				print "Recurse mode 2"
-		
 		
 	def _draw_bins(self, data):	
 		
@@ -214,20 +188,22 @@ class VisualSimulation(object):
 		px = py = 0 # Pixel pointers for x and y
 		
 		# Start at bottom
-		py = VisualSimulation.MAX_FRAME_HEIGHT - VisualSimulation.FRAME_BAR_THICKNESS
+		py = VisualSimulation.MAX_FRAME_HEIGHT - VisualSimulation.FRAME_BAR_THICKNESS - VisualSimulation.BIN_HEIGHT
 		
 			#temp = self._convert_db_to(data, mode=4)
 			
 			#if not type(temp) == type(None):
 				#data = temp
+				
+		self.normalize = 100
+		
 		#else:
 		if decrement:
-			self._convert_db_to(data, mode=2, decrement_by=5)
+			self._convert_db_to(data, mode=2, decrement_by=0.25)
 		else:
-			self._convert_db_to(data, mode=2, decrement_by=3)
+			self._convert_db_to(data, mode=2, decrement_by=0.5)
 			
-			
-		#color_percent = map(lambda c: float(c)/min(100, maxi), data) 
+		color_percent = map(lambda c: float(c)/100, self.curr_display) 
 		
 		# Uncomment sorting to have regular ascending frequency display
 		#temp = sorted(self.curr_display)
@@ -261,12 +237,13 @@ class VisualSimulation(object):
 			# Each bin per row
 			for bn in range(bins_per_row):
 					
-				#cv2.rectangle(self.frame, (px, py), (px + VisualSimulation.BIN_WIDTH, py + VisualSimulation.BIN_HEIGHT),  (0, 255*(color_percent[idx]), 255*(1-color_percent[idx])),  thickness=-1)
+				# Colored boxes
+				cv2.rectangle(self.frame, (px, py), (px + VisualSimulation.BIN_WIDTH, py + VisualSimulation.BIN_HEIGHT),  (0, 255*(color_percent[intensity_idx]), 0),  thickness=-1)
 				
 				#cv2.rectangle(self.frame, (px, py), (px + VisualSimulation.BIN_WIDTH, py + VisualSimulation.BIN_HEIGHT),  intensity[intensity_idx],  thickness=-1)
 				
 				# vertical movement
-				cv2.rectangle(self.frame, (px, py-self.curr_display[intensity_idx]), (px + VisualSimulation.BIN_WIDTH, py),  (44,255,131),  thickness=1)
+				#cv2.rectangle(self.frame, (px, py-self.curr_display[intensity_idx]), (px + VisualSimulation.BIN_WIDTH, py),  (44,255,131),  thickness=1)
 				
 				intensity_idx += 1
 				

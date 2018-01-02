@@ -32,7 +32,11 @@ class Serial(object):
 		# Open serial port
 		try:
 			self.serial = serial.Serial(port=self.port, baudrate=self.baud, timeout=timeout, write_timeout=write_timeout)
-			sleep(3)
+			
+			# Wait for ready signal from arduino
+			while not self.serial.read(size=1) == 'r':
+				sleep(0.05) 			
+			
 		except (ValueError, serial.SerialException) as err:
 			print err
 			sys.exit(0)
@@ -135,7 +139,7 @@ class Serial(object):
 				
 				self._handshake()
 			
-		print "Took {} ms".format(time.time()*1000 - t_in)
+		#print "Took {} ms".format(time.time()*1000 - t_in)
 			
 	def _handshake(self):
 		""" This function waits for the handshake """
@@ -149,8 +153,14 @@ class Serial(object):
 			val = self.serial.read(size=1)
 			string += val
 			
-			
-		print string
+		print "hs"
+	
+	def shutdown(self):
+		""" This function ends the serial thread, and closes the serial port """
+		
+		self.end_thread = True
+		self.serial.close()
+		
 		
 	def start_serial_thread(self):
 		""" This starts the actual thread """

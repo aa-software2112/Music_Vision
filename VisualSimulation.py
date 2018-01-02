@@ -39,7 +39,7 @@ class VisualSimulation(object):
 		
 		self.curr_display = np.array([0 for x in range(bins)])
 		
-		self.largest_value = 0
+		self.largest_value = 1
 		
 		self.prev_data = np.array([0 for x in range(bins)])
 		
@@ -151,7 +151,38 @@ class VisualSimulation(object):
 					#self.curr_display[self.curr_display >= centile] = self.curr_display[self.curr_display >= centile] + 10
 				
 				#self.curr_display = peaks.OR_peaks(self.prev_display, self.curr_display, len(self.curr_display), decrement_by=decrement_by)
-				
+		
+		# Using max and rebuilding exponential around it
+		elif mode ==3:
+			
+			# Ignore the first value, which is the max of all signals
+			max_idx = np.argmax(np.array(data[10:])) + 10
+			max_height = data[max_idx]
+			
+			temp = np.zeros([data.shape[0],], dtype=np.uint8)
+			
+			# Center point
+			max_idx = data.shape[0]/2
+			temp[max_idx] = max_height
+			
+			# Exponential base, larger (quicker cutoff) when quiter, smaller (slower cutoff) when louder
+			self.largest_value = max(self.largest_value, max_height)
+			base = 1 + (float(self.largest_value - max_height)/self.largest_value)*0.25
+			#base = 1.10
+			
+			# Remove negatives
+			right_of_max = -1*np.power(base, [x - max_idx for x in range(max_idx+1, data.shape[0])]) + max_height
+			right_of_max[right_of_max < 0] = 0
+			
+			temp[max_idx + 1:] = right_of_max
+			
+			left_of_max = -1*np.power(base, [-x + max_idx for x in range(0, max_idx)]) + max_height
+			left_of_max[left_of_max <0 ] = 0
+			
+			temp[0 : max_idx] = left_of_max
+			
+			data = temp
+			self.curr_display = data
 		
 	def _draw_bins(self, data):	
 		
@@ -198,10 +229,10 @@ class VisualSimulation(object):
 		self.normalize = 100
 		
 		#else:
-		if decrement:
-			self._convert_db_to(data, mode=2, decrement_by=0.25)
-		else:
-			self._convert_db_to(data, mode=2, decrement_by=0.5)
+		#if decrement:
+			#self._convert_db_to(data, mode=2, decrement_by=0.25)
+		#else:
+		self._convert_db_to(data, mode=3, decrement_by=0.5)
 			
 		color_percent = map(lambda c: float(c)/100, self.curr_display) 
 		
@@ -281,7 +312,6 @@ class VisualSimulation(object):
 					#print self.Q.qsize()
 					
 					msg = self.Q.get()
-					
 					
 					if type(msg) == type(""): # Is a string
 						

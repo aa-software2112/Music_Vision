@@ -18,45 +18,40 @@ AudioSegment.converter = "C:/ffmpeg/bin/ffmpeg.exe"
 
 class Song(object):
 
-	def __init__(self, song_path):
+	def __init__(self):
 		
-		self.song_path = song_path
-		
+		self.song_path = None
+			
 		self.song_data = []
 		
 		self.left = 0
 		self.right = 0
 		
-		self.fft_length = 256
-		
 		self.sample_rate = 0
 		
-		self.total_samples = 0
-		
-		self.num_fft = 0
-		
-		
 		self.fft_thread = None
+		
+		self.song_on = False
+	
+	def set_song_path(self, song_path):
+		
+		self.song_path = song_path
 	
 	def load(self):
 
-		self.song_data = AudioSegment.from_mp3(self.song_path)
-		temp = self.song_data.split_to_mono()
+		song_data = AudioSegment.from_mp3(self.song_path) # Get song data
 		
+		# Store left-side audio
+		temp = song_data.split_to_mono() # Split into mono
 		self.left = temp[0]
 		#self.right = temp[1]
 		
-	def set_properties(self):
+		self.sample_rate = song_data.frame_rate # Obtain Sample rate
 		
-		self.sample_rate = self.song_data.frame_rate
-		self.total_samples = self.song_data.frame_count()
-		self.num_fft = (self.total_samples / self.fft_length) - 2
 		
 	def display(self):
 		
 		print "Sample Rate {}Hz".format(self.sample_rate)
-		print "Total Samples {}".format(self.total_samples)
-		print "Total Seconds {}".format(self.total_samples/self.sample_rate)
 	
 	def plot(self, seconds):
 		
@@ -66,24 +61,30 @@ class Song(object):
 		plt.plot(time[:self.sample_rate*seconds], self.left.get_array_of_samples()[:self.sample_rate*seconds] , linewidth=0.05)
 		plt.show()
 		
-	def start_fft_thread(self, millis, serial_q=None):
+	def start_fft_thread(self, millis, serial_q):
 		
-		self.fft_thread = threading.Thread(target=self._fft_thread, args=(millis, ))
-		self.fft_thread.daemon = True
-		self.fft_thread.start()
+		if self.song_path:
+			
+			self.fft_thread = threading.Thread(target=self._fft_thread, args=(millis, serial_q))
+			self.fft_thread.daemon = True
+			self.fft_thread.start()
+	
+	def song_is_playing(self):
 		
-	def _fft_thread(self, millis):
+		return self.fft_thread.is_alive()
+	
+	def _fft_thread(self, millis, serial_q):
 	
 		# Get the closest millisecond to millis that allows for power of two bin size
 		fft_samples = self.sample_rate*(millis/1000.0) # Number of bins
-		fft_samples = int( math.pow(2, math.ceil( math.log(fft_samples)/math.log(2) )) )# Power of two bins
+		fft_samples = int( math.pow(2, math.ceil( math.log(fft_samples)/math.log(2) )) ) # Power of two bins
 		
 		# Start the visualization
-		message_Q = Queue()
+		#serial_q = Queue()
 	
-		viz = VisualSimulation(fft_samples/4, message_Q)
+		#viz = VisualSimulation(fft_samples/4, serial_q)
 		
-		viz.start()
+		#viz.start()
 		
 		# Calculate the new milliseconds
 		millis = (fft_samples)*(1.0/self.sample_rate)*1000
@@ -97,12 +98,8 @@ class Song(object):
 		# Start sample for the next fft
 		start_sample = 0
 		
-		# Start time of thread
-		in_thread = time()
+		# For adjusting delay dynamically
 		took_ms = 0
-		
-		# Last sent
-		last_send_time  = time()*1000
 		
 		# Thread sleep delay in milliseconds
 		sleep_delay = 0
@@ -110,42 +107,45 @@ class Song(object):
 		# Start playing music
 		s = vlc.MediaPlayer(self.song_path)
 		
-		song_on = False
-		
 		while (start_sample + fft_samples) < max_samples:
 		
-			if not song_on:
+			if not self.song_on:
 				s.play()
-				song_on = True
+				self.song_on = True
 			
 			# Song is ahead of data, push data forward
-			if s.get_time() - (start_sample*1.0/self.sample_rate)*1000 > 25:
+			if s.get_time() - (start_sample*1.0/self.sample_rate)*1000 > 15:
+				took_ms = self._fft_helper(fft_samples, samples, start_sample, serial_q)
+				
 				start_sample += fft_samples
-				took_ms = self._fft_helper(fft_samples, samples, start_sample, message_Q)
-				#print "Song Diff wrt Audio {}ms".format(s.get_time() - (start_sample*1.0/self.sample_rate)*1000)
+				
 				continue
 			else:
-				#	print "Song is {} ms ahead of data, sleeping for {} s".format(s.get_time() - (start_sample*1.0/self.sample_rate)*1000, (millis - took_ms - sleep_delay)/1000.0)
-				took_ms = self._fft_helper(fft_samples, samples, start_sample, message_Q)
+				took_ms = self._fft_helper(fft_samples, samples, start_sample, serial_q)
 			
 				sleep((millis - took_ms - sleep_delay)/1000.0)
+				
 			
 			start_sample += fft_samples
 		
 			
 		# Send done message to visualization
-		message_Q.put("DONE")
+		#serial_q.put("DONE")
 		s.stop()
+		self.song_on = False
 		
-		print "Took a total of {} seconds".format(int(time() - in_thread))
-			
 	
 	def _fft_helper(self, bin_size, samples, from_samp, message_Q):
 		
 		# Calculate the fft for a given size
 		t_in = time()*1000
 		
-		message_Q.put(  20*np.log10( abs((   (np.fft.rfft(samples[from_samp:from_samp + bin_size + 1]) - 1e-10)  /bin_size)[1:]) ) )
+		dout = ((np.fft.rfft(samples[from_samp:from_samp + bin_size + 1]) - 1e-10)  /bin_size)[1:]	
+		dout = abs(dout)
+		dout = 20*np.log10( dout)
+		dout[dout < 0] = 0
+		
+		message_Q.put(  dout )
 		
 		return time()*1000 - t_in
 		
@@ -170,12 +170,11 @@ class Song(object):
 	
 if __name__ == "__main__":
 	
-	song = Song(glob.glob("Charley-IDontGiveAShit.mp3")[0])
-	
+	song = Song()
+
+	song.set_song_path(glob.glob("2 - Primus - The Seven.mp3")[0])
 	
 	song.load()
-	
-	song.set_properties()
 	
 	song.start_fft_thread(10)
 	

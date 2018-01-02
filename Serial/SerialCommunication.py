@@ -1,13 +1,15 @@
 from serial.tools import list_ports
+import serial
 import sys
 import os
 import Queue
 import threading
 from time import sleep
+import time
 
-def list_to_string(lst):
+def list_to_bytes(lst):
 	
-	return ",".join([str(x) for x in lst]) + "$"
+	return bytearray( lst )
 	
 class InvalidSerial(Exception):
 	pass
@@ -18,19 +20,28 @@ class Serial(object):
 	any running process
 	"""
 
-
-	def __init__(self, msg_format_fn, port=None, baud=115200, timeout=1, write_timeout=1):
+	HANDSHAKE_CHAR = chr(254)
+	
+	def __init__(self, msg_format_fn, port=None, baud=115200, timeout=1, write_timeout=1, serial_q=None):
 		
 		self.baud = baud
 		self.port = None
 		
 		self._set_port(port)
 		
+		# Open serial port
+		try:
+			self.serial = serial.Serial(port=self.port, baudrate=self.baud, timeout=timeout, write_timeout=write_timeout)
+			sleep(3)
+		except (ValueError, serial.SerialException) as err:
+			print err
+			sys.exit(0)
+			
 		# Boolean that can be controlled externally to end the thread
 		self.end_thread = False
 		
 		# Will store the outbound messages
-		self.outbound = Queue.Queue()
+		self.outbound = serial_q if serial_q else Queue.Queue() 
 		
 		# Message Formatter function pointer
 		self.format_fn = msg_format_fn
@@ -101,16 +112,46 @@ class Serial(object):
 		byte also specified by the format function
 		""" 
 		
-		self.outbound.put(self.format_fn(lst))
+		self.outbound.put(lst)
 		
 	def _serial_thread(self):
 		""" This is the main thread that excutes the send and receives """	
+		count = 1
 		
+		self.serial.flushInput()
+		
+		t_in = time.time()*1000
+		
+		# Ends when external module sets end_thread to true
 		while not self.end_thread:
 			
-			sleep(3)
-			print "Thread"
-	
+			# Waits until there is data in the queue, assumes it is a list of integers
+			if self.outbound.qsize() > 0:
+				
+				# Format the integers as bytes (they will be between 0 and 255)
+				out = self.format_fn(self.outbound.get())
+				#print out
+				res = self.serial.write( out )
+				
+				self._handshake()
+			
+		print "Took {} ms".format(time.time()*1000 - t_in)
+			
+	def _handshake(self):
+		""" This function waits for the handshake """
+		
+		val = '0'
+		string = ""
+		
+		# Keep reading until the handshake is read
+		while not val == Serial.HANDSHAKE_CHAR:
+			
+			val = self.serial.read(size=1)
+			string += val
+			
+			
+		print string
+		
 	def start_serial_thread(self):
 		""" This starts the actual thread """
 		
@@ -120,7 +161,17 @@ class Serial(object):
 		
 		
 if __name__ == "__main__":
-	s =Serial(list_to_string, port='COM3')
+	s =Serial(list_to_bytes, port='COM3')
 	s.start_serial_thread()
 			
+	while True:
+		
+		# Change mode
+		s.add_list( ["m", 2])
+		
+		# Tell Arduino to take in data
+		# Send the data to take in 
+		s.add_list( ["d"] + [x for x in range(144)] )
+		
+		sleep(0.25)
 			

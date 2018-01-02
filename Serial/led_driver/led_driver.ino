@@ -9,6 +9,7 @@ int ptr = 0;
 void setup() {
 
   Serial.begin(115200);
+  Serial.print("r"); // Ready signal
 }
 
 void loop() {
@@ -20,11 +21,11 @@ void loop() {
   process_command();
 
   // Send a handshake back to Master
-  for (int i =0; i< NUM_LEDS; i++)
-  {
-    Serial.print(pixels[i]);
-    Serial.print(",");
-  }
+//  for (int i =0; i< NUM_LEDS; i++)
+//  {
+//    Serial.print(pixels[i]);
+//    Serial.print(",");
+//  }
     
   Serial.print((char) 254);
 }

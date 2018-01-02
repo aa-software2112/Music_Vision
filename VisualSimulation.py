@@ -79,7 +79,7 @@ class VisualSimulation(object):
 		
 		return (0, 255, 0)
 		
-	def _convert_db_to(self, data, mode=1, decrement_by=2,):
+	def _convert_db_to(self, data, mode=1, decrement_by=2):
 		""" This function takes an array of decibel data and returns the output visualization based on the requested mode"""
 		
 		

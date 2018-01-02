@@ -35,6 +35,7 @@ class Song(object):
 		
 		self.num_fft = 0
 		
+		
 		self.fft_thread = None
 	
 	def load(self):
@@ -65,7 +66,7 @@ class Song(object):
 		plt.plot(time[:self.sample_rate*seconds], self.left.get_array_of_samples()[:self.sample_rate*seconds] , linewidth=0.05)
 		plt.show()
 		
-	def start_fft_thread(self, millis):
+	def start_fft_thread(self, millis, serial_q=None):
 		
 		self.fft_thread = threading.Thread(target=self._fft_thread, args=(millis, ))
 		self.fft_thread.daemon = True
@@ -83,7 +84,6 @@ class Song(object):
 		viz = VisualSimulation(fft_samples/4, message_Q)
 		
 		viz.start()
-		
 		
 		# Calculate the new milliseconds
 		millis = (fft_samples)*(1.0/self.sample_rate)*1000
@@ -114,16 +114,20 @@ class Song(object):
 		
 		while (start_sample + fft_samples) < max_samples:
 		
-			took_ms = self._fft_helper(fft_samples, samples, start_sample, message_Q)
-			
 			if not song_on:
 				s.play()
 				song_on = True
-				
-			if s.get_time() - (start_sample*1.0/self.sample_rate)*1000 > 2:
-				pass
+			
+			# Song is ahead of data, push data forward
+			if s.get_time() - (start_sample*1.0/self.sample_rate)*1000 > 25:
+				start_sample += fft_samples
+				took_ms = self._fft_helper(fft_samples, samples, start_sample, message_Q)
 				#print "Song Diff wrt Audio {}ms".format(s.get_time() - (start_sample*1.0/self.sample_rate)*1000)
+				continue
 			else:
+				#	print "Song is {} ms ahead of data, sleeping for {} s".format(s.get_time() - (start_sample*1.0/self.sample_rate)*1000, (millis - took_ms - sleep_delay)/1000.0)
+				took_ms = self._fft_helper(fft_samples, samples, start_sample, message_Q)
+			
 				sleep((millis - took_ms - sleep_delay)/1000.0)
 			
 			start_sample += fft_samples
@@ -166,7 +170,7 @@ class Song(object):
 	
 if __name__ == "__main__":
 	
-	song = Song(glob.glob("RyanWhit-SuperKick.mp3")[0])
+	song = Song(glob.glob("Charley-IDontGiveAShit.mp3")[0])
 	
 	
 	song.load()
